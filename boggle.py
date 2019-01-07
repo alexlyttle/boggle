@@ -27,9 +27,9 @@ class Timer:
         thread.start()
 
     def timer(self):
-        print('You have {0} seconds to complete the round.'.format(self.time_limit))
+        print('You have {0} seconds to complete the round.\n'.format(self.time_limit))
         for i in range(self.time_limit):
-            print('Time: {0}\r'.format(i), end='')  # This does not work
+            # print('Time: {0}\r'.format(i), end='')  # This does not work
             time.sleep(1)
         print('Out of time!')
         self.player.stop()
@@ -137,17 +137,18 @@ class Player:
     def go(self, board, words):
         self.in_play = True
         seconds = 0
-        thread = Thread(target=self.guess_word, args=(words,))
-        thread.daemon = True
-        thread.start()
+        # thread = Thread(target=self.guess_word, args=(words,))
+        # thread.daemon = True
+        # thread.start()
         while self.in_play is True:
-            print('Time: {0}'.format(seconds))
+            # print('Time: {0}'.format(seconds))
             print(board)
             print('Score: {0}'.format(self.score))
             print('Words found:')
-            print(self.found_words)  # Make this cleaner looking
-            time.sleep(1)
-            seconds += 1
+            print(self.found_words)  # Make this cleaner looking / more efficient
+            self.guess_word(words)  # May do this another way
+            # time.sleep(1)
+            # seconds += 1
 
     def stop(self):
         self.in_play = False
@@ -220,34 +221,33 @@ class Boggle:
 
 
 if __name__ == '__main__':
-    run = True  # For eventual game loop, give option for player to try again
+    # run = True  # For eventual game loop, give option for player to try again
     player = Player(input('Please enter your name:\n'))
     board = Boggle(size=int(input('Please enter the size of the Boggle board.\n')))
     dictionary = load_dictionary('dictionary.txt')
     words = board.find_words(dictionary)  # Finds all possible words on the board
-    # player.go(board, words)
+    Timer(int(input('Enter the time limit in seconds:\n')), player)
+    player.go(board, words)
+    # Issue: when time is up, player does not exit loop in player.go() until after entered word!
 
-    start_time = time.time()
-    # elapsed_time = 0
-    player.in_play = True
-    Timer(120, player)
-    while player.in_play is True:
-        # This is no good, need to run a timer in a background thread
-        print(board)
-        print('Score: {0}'.format(player.score))
-        print('Words found:')
-        print(player.found_words)  # Make this cleaner looking
-        player.guess_word(words)
-        # elapsed_time = time.time() - start_time
+    # player.in_play = True
+    # while player.in_play is True:
+    #     # When pl
+    #     print(board)
+    #     print('Score: {0}'.format(player.score))
+    #     print('Words found:')
+    #     print(player.found_words)  # Make this cleaner looking
+    #     player.guess_word(words)
+    #     # elapsed_time = time.time() - start_time
     print('Out of time!')
     print('You found the following words:')
     print(player.found_words)
     print('You missed the following words:')
     print(words.difference(player.found_words))
-    #     print('Would you like to play again?')
-    #     replay = input('Y/n')
-    #     # Need to change this to be better
-    #     run = False if replay is 'n' or 'N' else True
+    # print('Would you like to play again?')
+    # replay = input('Y/n')
+    # # Need to change this!
+    # run = False if replay is 'n' or 'N' else True
     total_score = find_score(words)
     final_score = 100 * player.score/total_score
     print(('\nYour final score was {0:.0f}%!\n' +
