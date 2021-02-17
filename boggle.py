@@ -7,7 +7,9 @@ This code is a work in progress.
 The code describes a Boggle-like computer game.
 """
 
-import time
+import os, time, sys, queue
+from pprint import pprint
+# from tqdm import tqdm
 from random import choice
 from numpy import random
 from threading import Thread
@@ -15,12 +17,48 @@ from threading import Thread
 _VOWELS = list('AEIOU')
 _CONSONANTS = list('BCDFGHJKLMNPQRSTVWXYZ')
 _POINTS = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
+_INDENT = 23
+_PLURAL = lambda point: 's' if point > 1 else ''
+_WORDROWS = {k: f'{f"{k} letters ({v} point{_PLURAL(v)}): ":>{_INDENT}}' for k, v in _POINTS.items()}
+_WIDTH = 120
+_DIV = _WIDTH * '='
+
+_Q = queue.Queue()
+
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
+def format_words(words, separator=', '):
+    available = _WIDTH - _INDENT
+    rows = {k: [] for k in _POINTS.keys()}
+    words.sort()  # sort alphabetically
+    for word in words:
+        rows[len(word)].append(word)
+
+    blocks = []
+    for key, value in rows.items():
+        if len(value) == 0:
+            continue
+        s = f'{_WORDROWS[key]:<{_INDENT}}'
+
+        words_per_line = available//(key+len(separator))
+        total_lines = len(value)//words_per_line + 1
+
+        indices = [i*words_per_line for i in range(total_lines)]
+        lines = [separator.join(value[i:j]) for i, j in zip(indices, indices[1:]+[None])]
+        
+        s += (separator+'\n'+' '*_INDENT).join(lines)
+        blocks.append(s)
+    return '\n'.join(blocks)
 
 
 class Timer:
     def __init__(self, time_limit, player):
         self.time_limit = time_limit
         self.player = player
+        # self.stdout = os.dup(1)
+        # self.outfile = os.fdopen(self.stdout, mode='w')
+        self.outfile = sys.stdout
         # Run the timer in the background
         thread = Thread(target=self.timer)
         thread.daemon = True  # Allows the program to be exited, stopping this thread also
@@ -28,10 +66,15 @@ class Timer:
 
     def timer(self):
         print('You have {0} seconds to complete the round.\n'.format(self.time_limit))
+        # for i in tqdm(range(self.time_limit), ncols=_WIDTH, bar_format='Time limit: {n_fmt}/{total_fmt} seconds',
+        #               file=self.outfile, position=5):
         for i in range(self.time_limit):
             # print('Time: {0}\r'.format(i), end='')  # This does not work
+            # self.outfile.write("\r")
+            # self.outfile.write("{:2d} seconds remaining".format(self.time_limit - i)) 
+            # self.outfile.flush()
             time.sleep(1)
-        print('Out of time!')
+        print('Game over! Press ENTER to see your score...')
         self.player.stop()
         # Here need to write code to exit main game loop when this is achieved
 
@@ -99,10 +142,9 @@ class Player:
         """
         self.name = name
         self.score = score
-        if found_words is None:
-            found_words = set()
-        self.found_words = found_words
+        self.found_words = found_words or list() 
         self.in_play = False
+        self.message = None
 
     def guess_word(self, words):
         """
@@ -111,16 +153,18 @@ class Player:
         :return:
         """
         # while self.in_play is True:
-        guess = input('Enter word:\n').upper()
+        # tqdm.write('Enter word:', nolock=True)
+        # guess = sys.stdin.readline().upper()
+        guess = input('Enter word:').upper()
         # if self.in_play is False:
         # break
         if guess in words and guess not in self.found_words:
             self.score += find_score(guess)
-            self.found_words.add(guess)
+            self.found_words.append(guess)
         elif guess in self.found_words:
-            print('You have already entered this word, please try again!')
+            self.message = 'You have already entered this word, please try again!'
         else:
-            print('Invalid word, try again!')
+            self.message = 'Invalid word, try again!'
 
     def reset(self, score=0, found_words=None):
         """
@@ -130,9 +174,7 @@ class Player:
         :return:
         """
         self.score = score
-        if found_words is None:
-            found_words = set()
-        self.found_words = found_words
+        self.found_words = found_words or list()
 
     def go(self, board, words):
         self.in_play = True
@@ -142,10 +184,18 @@ class Player:
         # thread.start()
         while self.in_play is True:
             # print('Time: {0}'.format(seconds))
-            print(board)
+            clear_screen()
             print('Score: {0}'.format(self.score))
+            print(_DIV)
+            print(board)
+            print(_DIV)
             print('Words found:')
-            print(self.found_words)  # Make this cleaner looking / more efficient
+            print(format_words(self.found_words))
+            print(_DIV)
+            if self.message:
+                print(self.message)
+                print(_DIV)
+                self.message = None
             self.guess_word(words)  # May do this another way
             # time.sleep(1)
             # seconds += 1
@@ -170,6 +220,11 @@ class Boggle:
         if size*size != len(self.letters):
             raise ValueError('Boggle board is not square: Please check letters is equal to the size squared.')
 
+        self._separator = ' | '
+        self.width = self.size * (len(self._separator) + 1) - len(self._separator)
+        rows = map(self._separator.join, zip(*[iter(self.letters)] * self.size))
+        self._str = ('\n'+'-'*self.width+'\n').join(rows)
+
         # Find the adjacent tiles for each letter on the board:
         self.adjacency = {}
         for i in range(size*size):
@@ -193,7 +248,7 @@ class Boggle:
                 adj.append(i + 1)
 
     def __str__(self):
-        return '\n'.join(map(' '.join, zip(*[iter(self.letters)] * self.size)))
+        return self._str
 
     def find_words(self, dictionary):
         """
@@ -202,12 +257,12 @@ class Boggle:
         :return set: Set of found words
         """
         words, prefixes = dictionary
-        found = set()
+        found = list()
 
         def advance_path(prefix, path):
             """ Advance the path of possible words given the prior prefix and path indices. """
             if prefix in words:  # If the prefix is in list of words, add to found words
-                found.add(prefix)
+                found.append(prefix)
             if prefix in prefixes:  # If the prefix is in the list of prefixes, advance the path
                 for j in self.adjacency[path[-1]]:
                     # For each adjacent letter to the last element in the path
@@ -222,11 +277,17 @@ class Boggle:
 
 if __name__ == '__main__':
     # run = True  # For eventual game loop, give option for player to try again
-    player = Player(input('Please enter your name:\n'))
+    clear_screen()
+    # print('Please enter your name:')
+    # name = sys.stdin.readline()
+    name = input('Please enter your name:\n')
+    player = Player(name)
+
     board = Boggle(size=int(input('Please enter the size of the Boggle board.\n')))
     dictionary = load_dictionary('dictionary.txt')
     words = board.find_words(dictionary)  # Finds all possible words on the board
     Timer(int(input('Enter the time limit in seconds:\n')), player)
+    clear_screen()
     player.go(board, words)
     # Issue: when time is up, player does not exit loop in player.go() until after entered word!
 
@@ -239,16 +300,20 @@ if __name__ == '__main__':
     #     print(player.found_words)  # Make this cleaner looking
     #     player.guess_word(words)
     #     # elapsed_time = time.time() - start_time
-    print('Out of time!')
-    print('You found the following words:')
-    print(player.found_words)
-    print('You missed the following words:')
-    print(words.difference(player.found_words))
-    # print('Would you like to play again?')
-    # replay = input('Y/n')
-    # # Need to change this!
-    # run = False if replay is 'n' or 'N' else True
+    clear_screen()
+    
     total_score = find_score(words)
     final_score = 100 * player.score/total_score
     print(('\nYour final score was {0:.0f}%!\n' +
           'You scored {1} out of {2} possible points on this board.').format(final_score, player.score, total_score))
+    print(_DIV)
+    print('You found the following words:')
+    print(format_words(player.found_words))
+    print(_DIV)
+    print('You missed the following words:')
+    print(format_words(list(set(words).difference(set(player.found_words)))))
+    # print('Would you like to play again?')
+    # replay = input('Y/n')
+    # # Need to change this!
+    # run = False if replay is 'n' or 'N' else True
+
