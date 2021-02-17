@@ -7,7 +7,7 @@ This code is a work in progress.
 The code describes a Boggle-like computer game.
 """
 
-import os, time, sys, queue
+import os, time, sys, queue, threading
 from pprint import pprint
 # from tqdm import tqdm
 from random import choice
@@ -17,9 +17,9 @@ from threading import Thread
 _VOWELS = list('AEIOU')
 _CONSONANTS = list('BCDFGHJKLMNPQRSTVWXYZ')
 _POINTS = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
-_INDENT = 23
-_PLURAL = lambda point: 's' if point > 1 else ''
-_WORDROWS = {k: f'{f"{k} letters ({v} point{_PLURAL(v)}): ":>{_INDENT}}' for k, v in _POINTS.items()}
+_INDENT = 24
+_plural = lambda point: 's' if point > 1 else ''
+_WORDROWS = {k: f'{f"{k} letters ({v} point{_plural(v)})":<{_INDENT-2}}: ' for k, v in _POINTS.items()}
 _WIDTH = 120
 _DIV = _WIDTH * '='
 
@@ -52,6 +52,10 @@ def format_words(words, separator=', '):
     return '\n'.join(blocks)
 
 
+class TimeUp(Exception):
+    pass
+
+
 class Timer:
     def __init__(self, time_limit, player):
         self.time_limit = time_limit
@@ -75,8 +79,23 @@ class Timer:
             # self.outfile.flush()
             time.sleep(1)
         print('Game over! Press ENTER to see your score...')
+        # raise TimeUp('Game over! Press ENTER to see your score...')
+
         self.player.stop()
         # Here need to write code to exit main game loop when this is achieved
+
+# class Timer(threading.Timer):
+#     def run(self):
+#         self.exc = None            
+#         try: 
+#             super(Timer, self).run()
+#         except BaseException as e: 
+#             self.exc = e
+
+#     def join(self):
+#         super(Timer, self).join()
+#         if self.exc:
+#             raise self.exc
 
 
 def load_dictionary(file, min_len=3):
@@ -155,7 +174,7 @@ class Player:
         # while self.in_play is True:
         # tqdm.write('Enter word:', nolock=True)
         # guess = sys.stdin.readline().upper()
-        guess = input('Enter word:').upper()
+        guess = input('Enter word: ').upper()
         # if self.in_play is False:
         # break
         if guess in words and guess not in self.found_words:
@@ -176,14 +195,7 @@ class Player:
         self.score = score
         self.found_words = found_words or list()
 
-    def go(self, board, words):
-        self.in_play = True
-        seconds = 0
-        # thread = Thread(target=self.guess_word, args=(words,))
-        # thread.daemon = True
-        # thread.start()
-        while self.in_play is True:
-            # print('Time: {0}'.format(seconds))
+    def turn(self, board, words):
             clear_screen()
             print('Score: {0}'.format(self.score))
             print(_DIV)
@@ -197,6 +209,26 @@ class Player:
                 print(_DIV)
                 self.message = None
             self.guess_word(words)  # May do this another way
+
+    def time_up(self):
+        raise TimeUp('Game over! Press ENTER to see your score...')
+
+    def go(self, board, words):
+        self.in_play = True
+        # seconds = 0
+        # thread = Thread(target=self.guess_word, args=(words,))
+        # thread.daemon = True
+        # thread.start()
+        while self.in_play is True:
+            # print('Time: {0}'.format(seconds))
+            self.turn(board, words)
+            # try:
+            #     self.turn(board, words)
+            # except TimeUp as tu:
+            #     self.stop()
+            #     print(tu.msg)
+            #     break
+
             # time.sleep(1)
             # seconds += 1
 
@@ -287,7 +319,9 @@ if __name__ == '__main__':
     dictionary = load_dictionary('dictionary.txt')
     words = board.find_words(dictionary)  # Finds all possible words on the board
     Timer(int(input('Enter the time limit in seconds:\n')), player)
-    clear_screen()
+    # timer = Timer(int(input('Enter the time limit in seconds:\n')), player.time_up)
+    # timer.start()
+    # timer.join()
     player.go(board, words)
     # Issue: when time is up, player does not exit loop in player.go() until after entered word!
 
