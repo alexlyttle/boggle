@@ -1,6 +1,15 @@
 # boggle
-A game written in Python 3.7 which emulates and solves the Boggle board game.
 
-This repository is a work-in-progress and does not represent the intended final package. It started as a coding exercise for myself and has been published here to be shared with those which may be able to offer guidence or general coding advice.
+Unofficial Boggle-like game. Clone the repository and run the game,
 
-Run boggle.py to play the game (currently in an unfinished, but playable, state).
+```bash
+cd boggle
+python boggle.py
+```
+
+Unlike traditional Boggle, this game allows you to choose the size of your board and you are scored as a percentage of total words on the board.
+
+## To do
+
+- Add updating countdown timer (difficult as this interferes with word input)
+- Replace Q with Qu, but it still only counts as one letter
