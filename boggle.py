@@ -7,7 +7,7 @@ This code is a work in progress.
 The code describes a Boggle-like computer game.
 """
 
-import os, time, sys, queue, threading
+import os, time, sys, queue, threading, pyfiglet
 from pprint import pprint
 # from tqdm import tqdm
 from random import choice
@@ -22,8 +22,8 @@ _plural = lambda point: 's' if point > 1 else ''
 _WORDROWS = {k: f'{f"{k} letters ({v} point{_plural(v)})":<{_INDENT-2}}: ' for k, v in _POINTS.items()}
 _WIDTH = 120
 _DIV = _WIDTH * '='
-
-_Q = queue.Queue()
+_FIGLET = pyfiglet.Figlet(font='smkeyboard', width=_WIDTH)
+_TITLE = _FIGLET.renderText('Boggle')
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -50,53 +50,6 @@ def format_words(words, separator=', '):
         s += (separator+'\n'+' '*_INDENT).join(lines)
         blocks.append(s)
     return '\n'.join(blocks)
-
-
-class TimeUp(Exception):
-    pass
-
-
-class Timer:
-    def __init__(self, time_limit, player):
-        self.time_limit = time_limit
-        self.player = player
-        # self.stdout = os.dup(1)
-        # self.outfile = os.fdopen(self.stdout, mode='w')
-        self.outfile = sys.stdout
-        # Run the timer in the background
-        thread = Thread(target=self.timer)
-        thread.daemon = True  # Allows the program to be exited, stopping this thread also
-        thread.start()
-
-    def timer(self):
-        print('You have {0} seconds to complete the round.\n'.format(self.time_limit))
-        # for i in tqdm(range(self.time_limit), ncols=_WIDTH, bar_format='Time limit: {n_fmt}/{total_fmt} seconds',
-        #               file=self.outfile, position=5):
-        for i in range(self.time_limit):
-            # print('Time: {0}\r'.format(i), end='')  # This does not work
-            # self.outfile.write("\r")
-            # self.outfile.write("{:2d} seconds remaining".format(self.time_limit - i)) 
-            # self.outfile.flush()
-            time.sleep(1)
-        print('Game over! Press ENTER to see your score...')
-        # raise TimeUp('Game over! Press ENTER to see your score...')
-
-        self.player.stop()
-        # Here need to write code to exit main game loop when this is achieved
-
-# class Timer(threading.Timer):
-#     def run(self):
-#         self.exc = None            
-#         try: 
-#             super(Timer, self).run()
-#         except BaseException as e: 
-#             self.exc = e
-
-#     def join(self):
-#         super(Timer, self).join()
-#         if self.exc:
-#             raise self.exc
-
 
 def load_dictionary(file, min_len=3):
     """
@@ -149,98 +102,11 @@ def find_score(words, points=None):
         score += points[len(w)]
     return score
 
-
-class Player:
-
-    def __init__(self, name, score=0, found_words=None):
-        """
-        Initialise the player.
-        :param name: Name of the player
-        :param score: Optional, player score
-        :param found_words: Optional, words found by the player
-        """
-        self.name = name
-        self.score = score
-        self.found_words = found_words or list() 
-        self.in_play = False
-        self.message = None
-
-    def guess_word(self, words):
-        """
-        Asks the player to guess a word and checks if it is in a set of words.
-        :param set words: Set of allowed words
-        :return:
-        """
-        # while self.in_play is True:
-        # tqdm.write('Enter word:', nolock=True)
-        # guess = sys.stdin.readline().upper()
-        guess = input('Enter word: ').upper()
-        # if self.in_play is False:
-        # break
-        if guess in words and guess not in self.found_words:
-            self.score += find_score(guess)
-            self.found_words.append(guess)
-        elif guess in self.found_words:
-            self.message = 'You have already entered this word, please try again!'
-        else:
-            self.message = 'Invalid word, try again!'
-
-    def reset(self, score=0, found_words=None):
-        """
-        Resets the score and list of found words for the player.
-        :param score: Optional, default score
-        :param found_words: Optional, initial found words
-        :return:
-        """
-        self.score = score
-        self.found_words = found_words or list()
-
-    def turn(self, board, words):
-            clear_screen()
-            print('Score: {0}'.format(self.score))
-            print(_DIV)
-            print(board)
-            print(_DIV)
-            print('Words found:')
-            print(format_words(self.found_words))
-            print(_DIV)
-            if self.message:
-                print(self.message)
-                print(_DIV)
-                self.message = None
-            self.guess_word(words)  # May do this another way
-
-    def time_up(self):
-        raise TimeUp('Game over! Press ENTER to see your score...')
-
-    def go(self, board, words):
-        self.in_play = True
-        # seconds = 0
-        # thread = Thread(target=self.guess_word, args=(words,))
-        # thread.daemon = True
-        # thread.start()
-        while self.in_play is True:
-            # print('Time: {0}'.format(seconds))
-            self.turn(board, words)
-            # try:
-            #     self.turn(board, words)
-            # except TimeUp as tu:
-            #     self.stop()
-            #     print(tu.msg)
-            #     break
-
-            # time.sleep(1)
-            # seconds += 1
-
-    def stop(self):
-        self.in_play = False
-
-
-class Boggle:
+class Board:
 
     def __init__(self, size=4, letters=None, p_vow=0.3, p_con=0.7):
         """
-        Initialise a Boggle board.
+        Initialise a Board board.
         :param int size: Size, N, for an N x N board
         :param letters: Optional list of letters to fill the board
         :param float p_vow: Probability of there being a vowel on the board
@@ -279,6 +145,8 @@ class Boggle:
             if y < size - 1:  # If column is not last, add right element index
                 adj.append(i + 1)
 
+        self.found_words = list()
+
     def __str__(self):
         return self._str
 
@@ -304,50 +172,120 @@ class Boggle:
         for (i, letter) in enumerate(self.letters):
             # For each letter in the list of board letters, start a path
             advance_path(letter, [i])
-        return found
+        self.found_words = found
 
 
-if __name__ == '__main__':
-    # run = True  # For eventual game loop, give option for player to try again
+class Player:
+
+    def __init__(self, name='Player', score=0, found_words=None):
+        """
+        Initialise the player.
+        :param name: Name of the player
+        :param score: Optional, player score
+        :param found_words: Optional, words found by the player
+        """
+        self.name = name
+        self.score = score
+        self.found_words = found_words or list() 
+        self.message = None
+
+    def score_word(self, guess, available_words):
+        if guess in available_words and guess not in self.found_words:
+            self.score += find_score(guess)
+            self.found_words.append(guess)
+        elif guess in self.found_words:
+            self.message = 'You have already entered this word, please try again!'
+        elif guess is not None:
+            self.message = 'Invalid word, try again!'
+
+    def reset(self, score=0, found_words=None):
+        """
+        Resets the score and list of found words for the player.
+        :param score: Optional, default score
+        :param found_words: Optional, initial found words
+        :return:
+        """
+        self.score = score
+        self.found_words = found_words or list()
+
+
+class Boggle:
+    def __init__(self, player=None, board=None, time_limit=120, dictionary_file='dictionary.txt'):
+        """
+        Initialise the game.
+        :param player: Player
+        :param board: Board
+        :param time_limit: Optional, time limit in seconds
+        """
+        self.player = player or Player()
+        self.board = board or Board()
+        self.timer = threading.Timer(time_limit, self.stop)
+        self.timer.daemon = True  # Timer thread closes with main thread
+
+        dictionary = load_dictionary(dictionary_file)
+        self.board.find_words(dictionary)
+
+    def display(self):
+        clear_screen()
+        print(_TITLE)
+        print('Score: {0}'.format(self.player.score))
+        print(_DIV)
+        print(self.board)
+        print(_DIV)
+        print('Words found:')
+        print(format_words(self.player.found_words))
+        print(_DIV)
+        if self.player.message:
+            print(self.player.message)
+            print(_DIV)
+            self.player.message = None
+
+    def endgame(self):
+        clear_screen()
+        print(_TITLE)
+        total_score = find_score(self.board.found_words)
+        final_score = 100 * self.player.score/total_score
+        print(('Your final score was {0:.0f}%!\n' +
+            'You scored {1} out of {2} possible points on this board.').format(final_score, self.player.score, total_score))
+        print(_DIV)
+        print('You found the following words:')
+        print(format_words(self.player.found_words))
+        print(_DIV)
+        print('You missed the following words:')
+        missed_words = list(set(self.board.found_words).difference(set(self.player.found_words)))
+        print(format_words(missed_words))
+
+    def start(self):
+        self.in_play = True
+        self.timer.start()
+
+        guess = None
+        while self.in_play:
+            self.player.score_word(guess, self.board.found_words)
+            self.display()
+            guess = input('Enter word:\n').upper()
+        
+        self.endgame()
+
+    def stop(self):
+        self.in_play = False
+        print('Game over! Press ENTER to see your score.')
+  
+
+def main():
     clear_screen()
-    # print('Please enter your name:')
-    # name = sys.stdin.readline()
+    print(_TITLE)
+
     name = input('Please enter your name:\n')
     player = Player(name)
-
-    board = Boggle(size=int(input('Please enter the size of the Boggle board.\n')))
-    dictionary = load_dictionary('dictionary.txt')
-    words = board.find_words(dictionary)  # Finds all possible words on the board
-    Timer(int(input('Enter the time limit in seconds:\n')), player)
-    # timer = Timer(int(input('Enter the time limit in seconds:\n')), player.time_up)
-    # timer.start()
-    # timer.join()
-    player.go(board, words)
-    # Issue: when time is up, player does not exit loop in player.go() until after entered word!
-
-    # player.in_play = True
-    # while player.in_play is True:
-    #     # When pl
-    #     print(board)
-    #     print('Score: {0}'.format(player.score))
-    #     print('Words found:')
-    #     print(player.found_words)  # Make this cleaner looking
-    #     player.guess_word(words)
-    #     # elapsed_time = time.time() - start_time
-    clear_screen()
     
-    total_score = find_score(words)
-    final_score = 100 * player.score/total_score
-    print(('\nYour final score was {0:.0f}%!\n' +
-          'You scored {1} out of {2} possible points on this board.').format(final_score, player.score, total_score))
-    print(_DIV)
-    print('You found the following words:')
-    print(format_words(player.found_words))
-    print(_DIV)
-    print('You missed the following words:')
-    print(format_words(list(set(words).difference(set(player.found_words)))))
-    # print('Would you like to play again?')
-    # replay = input('Y/n')
-    # # Need to change this!
-    # run = False if replay is 'n' or 'N' else True
+    size = int(input('Please enter the size of the Boggle board.\n'))
+    board = Board(size=size)
+    
+    time_limit = int(input('Enter the time limit in seconds:\n'))
 
+    game = Boggle(player=player, board=board, time_limit=time_limit)
+    game.start()
+
+if __name__ == '__main__':
+    main()
