@@ -123,6 +123,11 @@ class Board:
         rows = map(self._separator.join, zip(*[iter(self.letters)] * self.size))
         self._str = ('\n'+'-'*self.width+'\n').join(rows)
 
+        # self._separator = ''        
+        # rows = map(lambda row: _FIGLET.renderText(self._separator.join(row)+'\r'), 
+        #            zip(*[iter(self.letters)] * self.size))
+        # self._str = '\n'.join(rows)
+
         # Find the adjacent tiles for each letter on the board:
         self.adjacency = {}
         for i in range(size*size):
