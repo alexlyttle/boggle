@@ -7,102 +7,16 @@ This code is a work in progress.
 The code describes a Boggle-like computer game.
 """
 
-import os, time, sys, queue, threading, pyfiglet
-from pprint import pprint
-# from tqdm import tqdm
+import os, time, threading
 from random import choice
 from numpy import random
-from threading import Thread
+from pyfiglet import Figlet
 
-_VOWELS = list('AEIOU')
-_CONSONANTS = list('BCDFGHJKLMNPQRSTVWXYZ')
-_POINTS = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
-_INDENT = 24
-_plural = lambda point: 's' if point > 1 else ''
-_WORDROWS = {k: f'{f"{k} letters ({v} point{_plural(v)})":<{_INDENT-2}}: ' for k, v in _POINTS.items()}
-_WIDTH = 120
-_DIV = _WIDTH * '='
-_FIGLET = pyfiglet.Figlet(font='smkeyboard', width=_WIDTH)
-_TITLE = _FIGLET.renderText('Boggle')
-
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
-    
-def format_words(words, separator=', '):
-    available = _WIDTH - _INDENT
-    rows = {k: [] for k in _POINTS.keys()}
-    words.sort()  # sort alphabetically
-    for word in words:
-        rows[len(word)].append(word)
-
-    blocks = []
-    for key, value in rows.items():
-        if len(value) == 0:
-            continue
-        s = f'{_WORDROWS[key]:<{_INDENT}}'
-
-        words_per_line = available//(key+len(separator))
-        total_lines = len(value)//words_per_line + 1
-
-        indices = [i*words_per_line for i in range(total_lines)]
-        lines = [separator.join(value[i:j]) for i, j in zip(indices, indices[1:]+[None])]
-        
-        s += (separator+'\n'+' '*_INDENT).join(lines)
-        blocks.append(s)
-    return '\n'.join(blocks)
-
-def load_dictionary(file, min_len=3):
-    """
-    Loads a dictionary of words from a given file or string and returns all words and prefixes.
-    :param file: File location or string for dictionary
-    :param int min_len: Optional minimum length of words
-    :return tuple: A 2-tuple of words and prefixes
-    """
-    def load(f):
-        for line in f:
-            # Strip off whitespace at end of line and capitalize
-            word = line.rstrip().upper()
-            if len(word) >= min_len:
-                # If the word length is at least the minimum, yield word in iteration
-                yield word
-
-    if isinstance(file, str):
-        with open(file) as f:
-            words = set(load(f))
-    else:
-        words = set(load(file))
-    # Finds set of prefixes for each word
-    prefixes = {w[:i] for w in words for i in range(1, len(w))}
-    return words, prefixes
-
-
-def random_letter(p_vow, p_con):
-    """
-    Return a random letter for a given distribution of vowels and consonants.
-    :param float p_vow: Probability of returning a vowel
-    :param float p_con: Probability of returning a consonant
-    :return string: Random letter
-    """
-    return random.choice((choice(_VOWELS), choice(_CONSONANTS)), p=(p_vow, p_con))
-
-
-def find_score(words, points=None):
-    """
-    Calculate score for given word(s).
-    :param words: String (or set) of the word (or words) to score
-    :param points: Optional points assignment to word lengths
-    :return: Score for the given word(s)
-    """
-    if points is None:
-        points = _POINTS
-    if isinstance(words, str):  # If words is just a string, make iterable
-        words = {words}
-    score = 0
-    for w in words:
-        score += points[len(w)]
-    return score
 
 class Board:
+
+    _vowels = list('AEIOU')
+    _consonants = list('BCDFGHJKLMNPQRSTVWXYZ')
 
     def __init__(self, size=4, letters=None, p_vow=0.3, p_con=0.7):
         """
@@ -113,9 +27,9 @@ class Board:
         :param float p_con: Probability of there being a consonant on the board
         """
         self.size = size
-        self.letters = [random_letter(p_vow, p_con) for _ in range(size*size)] if not letters else letters.upper()
+        self.letters = [self.random_letter(p_vow, p_con) for _ in range(size*size)] if not letters else letters.upper()
 
-        if size*size != len(self.letters):
+        if self.size*self.size != len(self.letters):
             raise ValueError('Boggle board is not square: Please check letters is equal to the size squared.')
 
         self._separator = ' | '
@@ -123,45 +37,52 @@ class Board:
         rows = map(self._separator.join, zip(*[iter(self.letters)] * self.size))
         self._str = ('\n'+'-'*self.width+'\n').join(rows)
 
-        # self._separator = ''        
-        # rows = map(lambda row: _FIGLET.renderText(self._separator.join(row)+'\r'), 
-        #            zip(*[iter(self.letters)] * self.size))
-        # self._str = '\n'.join(rows)
-
-        # Find the adjacent tiles for each letter on the board:
-        self.adjacency = {}
-        for i in range(size*size):
-            x, y = divmod(i, size)
-            self.adjacency[i] = adj = []
-            if x > 0:  # If row is not first, add above element index
-                adj.append(i - size)
-                if y > 0:  # If column is not first, add northwest element index
-                    adj.append(i - size - 1)
-                if y < size - 1:  # If column is not last, add northeast element index
-                    adj.append(i - size + 1)
-            if x < size - 1:  # If row is not last, add below element index
-                adj.append(i + size)
-                if y > 0:  # If column is not first, add southwest element index
-                    adj.append(i + size - 1)
-                if y < size - 1:  # If column is not last, add southeast element index
-                    adj.append(i + size + 1)
-            if y > 0:  # If column is not first, add left element index
-                adj.append(i - 1)
-            if y < size - 1:  # If column is not last, add right element index
-                adj.append(i + 1)
-
+        self.adjacency = self._init_adjacency()
         self.found_words = list()
 
     def __str__(self):
         return self._str
 
-    def find_words(self, dictionary):
+    def _init_adjacency(self):
+        adjacency = {}
+        for i in range(self.size*self.size):
+            x, y = divmod(i, self.size)
+            adjacency[i] = adj = []
+            if x > 0:  # If row is not first, add above element index
+                adj.append(i - self.size)
+                if y > 0:  # If column is not first, add northwest element index
+                    adj.append(i - self.size - 1)
+                if y < self.size - 1:  # If column is not last, add northeast element index
+                    adj.append(i - self.size + 1)
+            if x < self.size - 1:  # If row is not last, add below element index
+                adj.append(i + self.size)
+                if y > 0:  # If column is not first, add southwest element index
+                    adj.append(i + self.size - 1)
+                if y < self.size - 1:  # If column is not last, add southeast element index
+                    adj.append(i + self.size + 1)
+            if y > 0:  # If column is not first, add left element index
+                adj.append(i - 1)
+            if y < self.size - 1:  # If column is not last, add right element index
+                adj.append(i + 1)
+        return adjacency
+
+    def random_letter(self, p_vow, p_con):
+        """
+        Return a random letter for a given distribution of vowels and consonants.
+        :param float p_vow: Probability of returning a vowel
+        :param float p_con: Probability of returning a consonant
+        :return string: Random letter
+        """
+        return random.choice((choice(self._vowels), choice(self._consonants)), p=(p_vow, p_con))
+
+    def find_words(self, words):
         """
         Finds all possible words on the board.
-        :param tuple dictionary: A 2-tuple containing all words and prefixes
+        :param tuple words: A 2-tuple containing all words and prefixes
         :return set: Set of found words
         """
-        words, prefixes = dictionary
+        prefixes = {w[:i] for w in words for i in range(1, len(w))}
+        
         found = list()
 
         def advance_path(prefix, path):
@@ -196,7 +117,7 @@ class Player:
 
     def score_word(self, guess, available_words):
         if guess in available_words and guess not in self.found_words:
-            self.score += find_score(guess)
+            self.score += Boggle.find_score(guess)
             self.found_words.append(guess)
         elif guess in self.found_words:
             self.message = 'You have already entered this word, please try again!'
@@ -215,7 +136,20 @@ class Player:
 
 
 class Boggle:
-    def __init__(self, player=None, board=None, time_limit=120, dictionary_file='dictionary.txt'):
+    _points = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
+
+    _indent = 24
+    # _plural = lambda point: 's' if point > 1 else ''
+    _wordrows = {}  # {k: f'{f"{k} letters ({v} point{_plural(v)})":<{_indent-2}}: ' for k, v in _points.items()}
+    for k, v in _points.items():
+        plural = 's' if v > 1 else ''
+        _wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{_indent-2}}: '
+    _width = 120
+    _div = _width * '='
+    _figlet = Figlet(font='smkeyboard', width=_width)
+    _title = _figlet.renderText('Boggle')
+
+    def __init__(self, player=None, board=None, time_limit=120, words_file='words.txt'):
         """
         Initialise the game.
         :param player: Player
@@ -227,38 +161,106 @@ class Boggle:
         self.timer = threading.Timer(time_limit, self.stop)
         self.timer.daemon = True  # Timer thread closes with main thread
 
-        dictionary = load_dictionary(dictionary_file)
-        self.board.find_words(dictionary)
+        words = self.load_words(words_file)
+        self.board.find_words(words)
+
+    @staticmethod
+    def load_words(file, min_len=3):
+        """
+        Loads a dictionary of words from a given file or string and returns all words and prefixes.
+        :param file: File location or string for words
+        :param int min_len: Optional minimum length of words
+        :return tuple: A 2-tuple of words and prefixes
+        """
+        def load(f):
+            for line in f:
+                # Strip off whitespace at end of line and capitalize
+                word = line.rstrip().upper()
+                if len(word) >= min_len:
+                    # If the word length is at least the minimum, yield word in iteration
+                    yield word
+
+        if isinstance(file, str):
+            with open(file) as f:
+                words = set(load(f))
+        else:
+            words = set(load(file))
+        # Finds set of prefixes for each word
+        return words
+
+    @staticmethod
+    def clear_screen():
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+    @classmethod
+    def find_score(cls, words):
+        """
+        Calculate score for given word(s).
+        :param words: String (or set) of the word (or words) to score
+        :param points: Optional points assignment to word lengths
+        :return: Score for the given word(s)
+        """
+        if isinstance(words, str):  # If words is just a string, make iterable
+            words = {words}
+        score = 0
+        for w in words:
+            score += cls._points[len(w)]
+        return score
+
+    def format_words(self, words, separator=', '):
+        available = self._width - self._indent
+        rows = {k: [] for k in self._points.keys()}
+        words.sort()  # sort alphabetically
+        for word in words:
+            rows[len(word)].append(word)
+
+        blocks = []
+        for key, value in rows.items():
+            if len(value) == 0:
+                continue
+            s = f'{self._wordrows[key]:<{self._indent}}'
+
+            words_per_line = available//(key+len(separator))
+            total_lines = len(value)//words_per_line + 1
+
+            indices = [i*words_per_line for i in range(total_lines)]
+            lines = [separator.join(value[i:j]) for i, j in zip(indices, indices[1:]+[None])]
+            
+            s += (separator+'\n'+' '*self._indent).join(lines)
+            blocks.append(s)
+        return '\n'.join(blocks)
 
     def display(self):
-        clear_screen()
-        print(_TITLE)
+        self.clear_screen()
+        print(self._title)
         print('Score: {0}'.format(self.player.score))
-        print(_DIV)
+        print(self._div)
         print(self.board)
-        print(_DIV)
+        print(self._div)
         print('Words found:')
-        print(format_words(self.player.found_words))
-        print(_DIV)
+        print(self.format_words(self.player.found_words))
+        print(self._div)
         if self.player.message:
             print(self.player.message)
-            print(_DIV)
+            print(self._div)
             self.player.message = None
 
     def endgame(self):
-        clear_screen()
-        print(_TITLE)
-        total_score = find_score(self.board.found_words)
+        self.clear_screen()
+        print(self._title)
+        total_score = self.find_score(self.board.found_words)
         final_score = 100 * self.player.score/total_score
-        print(('Your final score was {0:.0f}%!\n' +
-            'You scored {1} out of {2} possible points on this board.').format(final_score, self.player.score, total_score))
-        print(_DIV)
+        print((
+            'Your final score was {0:.0f}%!\n' +
+            'You scored {1} out of {2} possible points on this board.'
+            ).format(final_score, self.player.score, total_score))
+        print(self._div)
         print('You found the following words:')
-        print(format_words(self.player.found_words))
-        print(_DIV)
+        print(self.format_words(self.player.found_words))
+        print(self._div)
         print('You missed the following words:')
         missed_words = list(set(self.board.found_words).difference(set(self.player.found_words)))
-        print(format_words(missed_words))
+        print(self.format_words(missed_words))
 
     def start(self):
         self.in_play = True
@@ -268,26 +270,26 @@ class Boggle:
         while self.in_play:
             self.player.score_word(guess, self.board.found_words)
             self.display()
-            guess = input('Enter word:\n').upper()
+            guess = input('Enter word:').upper()
         
         self.endgame()
 
     def stop(self):
         self.in_play = False
-        print('Game over! Press ENTER to see your score.')
+        print('\nGame over! Press ENTER to see your score.')
   
 
 def main():
-    clear_screen()
-    print(_TITLE)
+    Boggle.clear_screen()
+    print(Boggle._title)
 
-    name = input('Please enter your name:\n')
+    name = input('Please enter your name: ')
     player = Player(name)
     
-    size = int(input('Please enter the size of the Boggle board.\n'))
+    size = int(input('Please enter the size of the Boggle board. '))
     board = Board(size=size)
     
-    time_limit = int(input('Enter the time limit in seconds:\n'))
+    time_limit = int(input('Enter the time limit in seconds: '))
 
     game = Boggle(player=player, board=board, time_limit=time_limit)
     game.start()
