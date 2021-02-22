@@ -270,7 +270,7 @@ class Boggle:
         while self.in_play:
             self.player.score_word(guess, self.board.found_words)
             self.display()
-            guess = input('Enter word:').upper()
+            guess = input('Enter word: ').upper()
         
         self.endgame()
 
@@ -286,7 +286,7 @@ def main():
     name = input('Please enter your name: ')
     player = Player(name)
     
-    size = int(input('Please enter the size of the Boggle board. '))
+    size = int(input('Please enter the size of the Boggle board: '))
     board = Board(size=size)
     
     time_limit = int(input('Enter the time limit in seconds: '))
