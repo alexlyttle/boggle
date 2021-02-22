@@ -8,13 +8,65 @@ The code describes a Boggle-like computer game.
 """
 
 import os, time, threading, shutil, sys
-from typing import Optional, Sequence
-from random import choice, choices
-from pyfiglet import Figlet
+from typing import Optional, Sequence, Callable, Union
+from random import choice, choices, seed
 
 
-class BoardWidthError(Exception):
-    pass
+class LetterFormatter:
+    """
+    Letter formatter. Formats any given Sequence of letters to appear as if
+    they were letters on a Boggle board.
+
+    Parameters
+    ----------
+    letter_width : int
+        The width assigned to each letter. Default is 3, meaning letters can
+        be up to 3 characters wide and are padded with whitespace.
+    letters_per_row : int
+        The number of letters allowed before starting a new line. Default is
+        6, corresponding to the length of the word 'Boggle'.
+    
+    Attributes
+    ----------
+    sep : str
+        Characters separating each letter.
+    wrap : str
+        Characters wrapping the beginning and end of each line.
+    letter_width : int
+        The width assigned to each letter. 
+    letters_per_row : int
+        The number of letters allowed before starting a new line.   
+    header : str
+        The header string for the formatter.
+    row_sep : str
+        The string separating each row of letters.
+    footer : str
+        The footer string for the formatter.
+
+    """
+    sep = '|||'
+    wrap = '||'
+
+    def __init__(self, letter_width: int=3, letters_per_row:int=6):
+
+        self.letter_width = letter_width
+        self.letters_per_row = letters_per_row
+        self.header = (' ' + '_' * (len(self.sep)+self.letter_width-1)) * \
+            self.letters_per_row + '\n'
+        self.row_sep = '\n|' + ('|' + '___' + '||') * self.letters_per_row + \
+            '\n'
+        self.footer = '|' + ('/' + '___' + '\\|') * self.letters_per_row
+
+    def format(self, letters: Sequence[str]) -> str:
+        rows = map(
+            lambda row: self.wrap + \
+                self.sep.join([f'{r:<{self.letter_width}}' for r in row]) + \
+                self.wrap,
+            zip(*[iter(letters)] * self.letters_per_row)
+        )
+        s = self.header + self.row_sep.join(rows) + self.row_sep + \
+            self.footer
+        return s
 
 
 class Board:
@@ -26,26 +78,33 @@ class Board:
     size : int, optional
         The size, N for an N x N board. Default is 4.
     letters : Sequence of str or str, optional
-        If letters is not None, size will be ignored. The Sequence must have
-        length equal to a square number. Default is None.
+        Sequence of letters on the board. If letters is not None, size will be
+        ignored. The Sequence must have length equal to a square number.
+        Default is None.
     p_vow : float, optional
-        Probability of a letter on the board being a float. Not used if letter
+        Probability of a letter on the board being a vowel. Not used if letter
         is not None. Default is 0.38.
     p_con : float, optional
-        Probability of a letter on the board being a float. Not used if letter
-        is not None. Default is 0.62.
+        Probability of a letter on the board being a consonant. Not used if
+        letter is not None. Default is 0.62.
+    random_seed : optional
+        Seed for choosing random letters for the board.
 
     Attributes
     ----------
     size : int
+        Size of the board, N for an N x N board.
     p_vow : float
+        Probability of a letter on the board being a vowel.
     p_con : float
+        Probability of a letter on the board being a consonant.
     letters : list of str
-    adjacency : dict of 
-    found_words
-
-    Methods
-    -------
+        List of letters on the board.
+    adjacency : dict of list of int
+        Adjacency matrix for each index on the board.
+    found_words : list of str
+        List of all possible words on the board. Empty unless find_words is
+        called.
 
     """
 
@@ -55,7 +114,10 @@ class Board:
 
     def __init__(self, size: Optional[int]=4, 
                  letters: Optional[Sequence[str]]=None, 
-                 p_vow: Optional[float]=None, p_con: Optional[float]=None):
+                 p_vow: Optional[float]=None, p_con: Optional[float]=None,
+                 random_seed=None):
+        seed(random_seed)
+        
         self.size = size
         self.p_vow = p_vow or 0.38
         self.p_con = p_con or 0.62
@@ -67,32 +129,44 @@ class Board:
                 raise ValueError('Length of letters is not a square number.')
             self.size = int(size)
 
-        sep = '|||'
-        wrap = '||'
-        self._width = self.size * (len(sep) + 3) - len(sep) + 2 * len(wrap)
-        rows = map(
-            lambda row: wrap + \
-                sep.join([f'{r:<3}' for r in row]) + wrap,
-            zip(*[iter(self.letters)] * self.size)
-        )
-        # self._str = ('\n'+'-'*self._width+'\n').join(rows)
-        row_head = (' ' + '_' * (len(sep) + 2)) * self.size + '\n'
-        row_sep = '\n|' + ('|' + '___' + '||') * self.size + '\n'
-        row_foot = '|' + ('/' + '___' + '\\|') * self.size
-        self._str = row_head + row_sep.join(rows) + row_sep + row_foot
+        formatter = LetterFormatter(letters_per_row=self.size)
+        self._str = formatter.format(self.letters)
+
         self.adjacency = self._init_adjacency()
         self.found_words = list()
+    
+    @classmethod
+    def vowels(cls):
+        return cls._vowels
 
-        self._check_width()
+    @classmethod
+    def consonants(cls):
+        return cls._consonants
+
+    @classmethod
+    def set_vowels(cls, vowels: Sequence[str]):
+        cls._vowels = vowels
+
+    @classmethod
+    def set_consonants(cls, consonants: Sequence[str]):
+        cls._consonants = consonants
 
     def __str__(self):
         return self._str
 
-    def _check_width(self):
-        if self._width > Boggle._width:
-            raise BoardWidthError('Board width exceeds terminal window width.')
+    def _validate_letter(self, letter: str):
+        """
+        Validate a single letter.
 
-    def _validate_letter(self, letter):
+        Raises
+        ------
+        ValueError :
+            If a letter is not a vowel or consonant (excluding 'Q' and 
+            including 'QU').
+        TypeError :
+            If the letter is not a string.
+
+        """
         if isinstance(letter, str):
             if letter in self._vowels or letter in self._consonants:
                 return letter.upper()
@@ -102,7 +176,28 @@ class Board:
         else:
             raise TypeError(f'Letter {letter} is not an instance of str.')
 
-    def _validate_letters(self, letters):
+    def _validate_letters(self, letters: Optional[Sequence[str]]=None):
+        """
+        Validate a Sequence of letters. If letters is None, a list of letters
+        will be assigned at random according to p_vow and p_con.
+
+        Parameters
+        ----------
+        letters : Sequence of str, optional
+            Letters to validate. If None (default) then a random list of
+            letters will be drawn.
+
+        Returns
+        -------
+        letters : list of str
+            List of letters on the board.
+
+        Raises
+        ------
+        TypeError :
+            If letters is not a Sequence or None.
+
+        """
         if isinstance(letters, Sequence):
             letters = [self._validate_letter(letter) for letter in letters]
         elif letters is None:
@@ -113,6 +208,15 @@ class Board:
         return letters
 
     def _init_adjacency(self):
+        """
+        Initialise the adjacency matrix for the board.
+
+        Returns
+        -------
+        adjacency : dict of list of int
+            The adjacency for each index of the board.
+
+        """
         adjacency = {}
         for i in range(self.size**2):
             x, y = divmod(i, self.size)
@@ -146,16 +250,31 @@ class Board:
     def choose_letters(self, k=1):
         """
         Choose vowel or consonant letter types.
+
+        Properties
+        ----------
+        k : int
+            The length of list of chosen letters to return.
+
+        Returns
+        -------
+        choices : list of Callable
+            List of functions which choose from vowels or consonants when
+            called.
         """
         return choices([lambda: choice(self._vowels), 
                         lambda: choice(self._consonants)], 
                        weights=[self.p_vow, self.p_con], k=k)
 
-    def find_words(self, words):
+    def find_words(self, words: Sequence[str]):
         """
-        Finds all possible words on the board.
-        :param tuple words: A 2-tuple containing all words and prefixes
-        :return set: Set of found words
+        Finds all possible words on the board and sets found_words.
+
+        Parameters
+        ----------
+        words : Sequence of str
+            The sequence of valid words.
+        
         """
         prefixes = {w[:i] for w in words for i in range(1, len(w))}
         
@@ -189,20 +308,42 @@ class Board:
 
 
 class Player:
+    """
+    Class for the player.
 
-    def __init__(self, name='Player', score=0, found_words=None):
-        """
-        Initialise the player.
-        :param name: Name of the player
-        :param score: Optional, player score
-        :param found_words: Optional, words found by the player
-        """
+    Parameters
+    ----------
+    name : str
+        Name of the player. Default is 'Player'. This is not currently used.
+    score : int
+        The player's initial score. Default is 0.
+    found_words : Sequence of str, optional
+        Initial list of found words for the player.
+    
+    Attributes
+    ----------
+    name : str
+        Name of the player.
+    score : int
+        The player's current score.
+    found_words : list of str
+        List of words found by the player.
+    messsage : str
+        Message to display to the player at the beginning of their turn.
+
+    """
+
+    def __init__(self, name: str='Player', score: int=0,
+                 found_words: Optional[Sequence[str]]=None):
         self.name = name
         self.score = score
-        self.found_words = found_words or list() 
+        self.found_words = list(found_words or [])
         self.message = None
 
-    def score_word(self, guess, available_words):
+    def score_word(self, guess: str, available_words: Sequence[str]):
+        """
+        Scores a word given a guess and list of available words.
+        """
         if guess in available_words and guess not in self.found_words:
             self.score += Boggle.find_score(guess)
             self.found_words.append(guess)
@@ -212,41 +353,43 @@ class Player:
         elif guess is not None:
             self.message = 'Invalid word, try again!'
 
-    def reset(self, score=0, found_words=None):
+    def reset(self, score: int=0, found_words: Optional[Sequence[str]]=None):
         """
         Resets the score and list of found words for the player.
-        :param score: Optional, default score
-        :param found_words: Optional, initial found words
-        :return:
         """
         self.score = score
-        self.found_words = found_words or list()
+        self.found_words = list(found_words or [])
 
 
 class Boggle:
+    """
+    Class for the Boggle game. Controls the operation of the game.
+
+    """
     _points: dict = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
 
     _indent: int = 24
     _wordrows: dict = {}  
-    for k, v in _points.items():
-        plural = 's' if v > 1 else ''
-        _wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{_indent-2}}: '
-        del plural
-    _width: int = max(shutil.get_terminal_size()[0], 80)
-    # _height: int = shutil.get_terminal_size()[1]
-    _div: str = _width * '='
-    _figlet: Figlet = Figlet(font='smkeyboard', width=_width)
-    _title: str = _figlet.renderText('Boggle')
+    # for k, v in _points.items():
+    #     plural = 's' if v > 1 else ''
+    #     _wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{_indent-2}}: '
+    #     del plural
+    # _width: int = max(shutil.get_terminal_size()[0], 80)
+    # _div: str = _width * '='
+    _formatter: LetterFormatter = LetterFormatter()
+    _title: str = _formatter.format('Boggle')
 
     def __init__(self, player: Optional[Player]=None,
                  board: Optional[Board]=None, time_limit: int=120,
                  words_file: str='words.txt'):
-        """
-        Initialise the game.
-        :param player: Player
-        :param board: Board
-        :param time_limit: Optional, time limit in seconds
-        """
+        
+        for k, v in self._points.items():
+            plural = 's' if v > 1 else ''
+            self._wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{self._indent-2}}: '
+            # del plural       
+        self._width = max(shutil.get_terminal_size()[0], 80)
+        self._div = self._width * '='
+
         self.player = player or Player()
         self.board = board or Board()
         self.timer = threading.Timer(time_limit, self.stop)
@@ -255,14 +398,30 @@ class Boggle:
         words = self.load_words(words_file)
         self.board.find_words(words)
 
-    @staticmethod
-    def load_words(file, min_len=3):
+    @classmethod
+    def points(cls):
+        return cls._points
+
+    @classmethod
+    def set_points(cls, points: dict):
+        cls._points = points
+    
+    @classmethod
+    def find_score(cls, words: Union[str, Sequence[str]]):
         """
-        Loads a dictionary of words from a given file or string and returns all
-        words and prefixes.
-        :param file: File location or string for words
-        :param int min_len: Optional minimum length of words
-        :return tuple: A 2-tuple of words and prefixes
+        Calculate score for given word(s).
+        """
+        if isinstance(words, str):  # If words is just a string, make iterable
+            words = {words}
+        score = 0
+        for w in words:
+            score += cls._points[len(w)]
+        return score
+
+    @staticmethod
+    def load_words(file, min_len: int=3):
+        """
+        Loads a list of words from a given file.
         """
         def load(f):
             for line in f:
@@ -283,24 +442,15 @@ class Boggle:
 
     @staticmethod
     def clear_screen():
+        """
+        Clear the screen.
+        """
         os.system('cls' if os.name == 'nt' else 'clear')
 
-    @classmethod
-    def find_score(cls, words):
+    def format_words(self, words: Sequence[str], separator: str=', '):
         """
-        Calculate score for given word(s).
-        :param words: String (or set) of the word (or words) to score
-        :param points: Optional points assignment to word lengths
-        :return: Score for the given word(s)
+        Formats a list of words neatly.
         """
-        if isinstance(words, str):  # If words is just a string, make iterable
-            words = {words}
-        score = 0
-        for w in words:
-            score += cls._points[len(w)]
-        return score
-
-    def format_words(self, words, separator=', '):
         available = self._width - self._indent
         rows = {k: [] for k in self._points.keys()}
         words.sort()  # sort alphabetically
@@ -325,6 +475,9 @@ class Boggle:
         return '\n'.join(blocks)
 
     def display(self):
+        """
+        Displays the board on a blank screen.
+        """
         self.clear_screen()
         print(self._title)
         print('Score: {0}'.format(self.player.score))
@@ -340,6 +493,9 @@ class Boggle:
             self.player.message = None
 
     def endgame(self):
+        """
+        Displays the endgame screen and information.
+        """
         self.clear_screen()
         print(self._title)
         total_score = self.find_score(self.board.found_words)
@@ -361,6 +517,9 @@ class Boggle:
         print(self.format_words(missed_words))
 
     def start(self):
+        """
+        Starts the game.
+        """
         self.in_play = True
         self.timer.start()
 
@@ -373,6 +532,9 @@ class Boggle:
         self.endgame()
 
     def stop(self):
+        """
+        Calls to stop the game.
+        """
         self.in_play = False
         print('\nGame over! Press ENTER to see your score.')
   
