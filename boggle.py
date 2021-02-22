@@ -102,8 +102,8 @@ class Board:
         List of letters on the board.
     adjacency : dict of list of int
         Adjacency matrix for each index on the board.
-    found_words : list of str
-        List of all possible words on the board. Empty unless find_words is
+    found_words : Set of str
+        Set of all possible words on the board. Empty unless find_words is
         called.
 
     """
@@ -133,7 +133,7 @@ class Board:
         self._str = formatter.format(self.letters)
 
         self.adjacency = self._init_adjacency()
-        self.found_words = list()
+        self.found_words = set()
     
     @classmethod
     def vowels(cls):
@@ -278,7 +278,7 @@ class Board:
         """
         prefixes = {w[:i] for w in words for i in range(1, len(w))}
         
-        found = list()
+        found = set()
 
         def _advance_path(prefix, path):
             """
@@ -287,7 +287,7 @@ class Board:
             """
             if prefix in words:
                 # If prefix is in list of words, add to found words
-                found.append(prefix)
+                found.add(prefix)
             if prefix in prefixes:
                 # If prefix is in the list of prefixes, advance the path
                 for j in self.adjacency[path[-1]]:
@@ -318,7 +318,7 @@ class Player:
     score : int
         The player's initial score. Default is 0.
     found_words : Sequence of str, optional
-        Initial list of found words for the player.
+        Initial set of found words for the player.
     
     Attributes
     ----------
@@ -326,8 +326,8 @@ class Player:
         Name of the player.
     score : int
         The player's current score.
-    found_words : list of str
-        List of words found by the player.
+    found_words : set of str
+        Set of words found by the player.
     messsage : str
         Message to display to the player at the beginning of their turn.
 
@@ -337,16 +337,16 @@ class Player:
                  found_words: Optional[Sequence[str]]=None):
         self.name = name
         self.score = score
-        self.found_words = list(found_words or [])
+        self.found_words = set(found_words or ())
         self.message = None
 
     def score_word(self, guess: str, available_words: Sequence[str]):
         """
-        Scores a word given a guess and list of available words.
+        Scores a word given a guess and set of available words.
         """
         if guess in available_words and guess not in self.found_words:
             self.score += Boggle.find_score(guess)
-            self.found_words.append(guess)
+            self.found_words.add(guess)
         elif guess in self.found_words:
             self.message = 'You have already entered this word, ' + \
                 'please try again!'
@@ -355,10 +355,10 @@ class Player:
 
     def reset(self, score: int=0, found_words: Optional[Sequence[str]]=None):
         """
-        Resets the score and list of found words for the player.
+        Resets the score and set of found words for the player.
         """
         self.score = score
-        self.found_words = list(found_words or [])
+        self.found_words = set(found_words or ())
 
 
 class Boggle:
@@ -367,15 +367,8 @@ class Boggle:
 
     """
     _points: dict = {3: 1, 4: 2, 5: 4, 6: 6, 7: 9, 8: 15}
-
     _indent: int = 24
     _wordrows: dict = {}  
-    # for k, v in _points.items():
-    #     plural = 's' if v > 1 else ''
-    #     _wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{_indent-2}}: '
-    #     del plural
-    # _width: int = max(shutil.get_terminal_size()[0], 80)
-    # _div: str = _width * '='
     _formatter: LetterFormatter = LetterFormatter()
     _title: str = _formatter.format('Boggle')
 
@@ -383,9 +376,11 @@ class Boggle:
                  board: Optional[Board]=None, time_limit: int=120,
                  words_file: str='words.txt'):
         
+        k_max = max(self._points.keys())
         for k, v in self._points.items():
             plural = 's' if v > 1 else ''
-            self._wordrows[k] = f'{f"{k} letters ({v} point{plural})":<{self._indent-2}}: '
+            plus = '+' if k == k_max else ''
+            self._wordrows[k] = f'{f"{k}{plus} letters ({v} point{plural})":<{self._indent-2}}: '
             # del plural       
         self._width = max(shutil.get_terminal_size()[0], 80)
         self._div = self._width * '='
@@ -403,8 +398,16 @@ class Boggle:
         return cls._points
 
     @classmethod
+    def indent(cls):
+        return cls._indent
+
+    @classmethod
     def set_points(cls, points: dict):
         cls._points = points
+
+    @classmethod
+    def set_indent(cls, indent: int):
+        cls._indent = indent
     
     @classmethod
     def find_score(cls, words: Union[str, Sequence[str]]):
@@ -414,8 +417,9 @@ class Boggle:
         if isinstance(words, str):  # If words is just a string, make iterable
             words = {words}
         score = 0
+        k_max = max(cls._points.keys())
         for w in words:
-            score += cls._points[len(w)]
+            score += cls._points[min(len(w), k_max)]
         return score
 
     @staticmethod
@@ -434,9 +438,9 @@ class Boggle:
 
         if isinstance(file, str):
             with open(file) as f:
-                words = list(load(f))
+                words = set(load(f))
         else:
-            words = list(load(file))
+            words = set(load(file))
         # Finds set of prefixes for each word
         return words
 
@@ -453,9 +457,10 @@ class Boggle:
         """
         available = self._width - self._indent
         rows = {k: [] for k in self._points.keys()}
-        words.sort()  # sort alphabetically
+        sorted(words)  # sort alphabetically
+        k_max = max(self._points.keys())
         for word in words:
-            rows[len(word)].append(word)
+            rows[min(len(word), k_max)].append(word)
 
         blocks = []
         for key, value in rows.items():
@@ -509,10 +514,8 @@ class Boggle:
         print(self.format_words(self.player.found_words))
         print(self._div)
         print('You missed the following words:')
-        missed_words = list(
-            set(self.board.found_words).difference(
-                set(self.player.found_words)
-            )
+        missed_words = self.board.found_words.difference(
+            self.player.found_words
         )
         print(self.format_words(missed_words))
 
